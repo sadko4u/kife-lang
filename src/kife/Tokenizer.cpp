@@ -26,8 +26,6 @@
 
 namespace kife
 {
-    static const char *memory_file_name="<memory>";
-
     Tokenizer::Tokenizer()
     {
         vBuffer         = nullptr;
@@ -43,7 +41,6 @@ namespace kife
         sToken.vBuffer  = nullptr;
         sToken.nBufCap  = 0;
         sToken.nBufSize = 0;
-        sToken.sPath    = nullptr;
         sToken.nLine    = 1;
         sToken.nColumn  = 1;
         sToken.bUnget   = false;
@@ -63,7 +60,6 @@ namespace kife
         sToken.vBuffer  = release_ptr(src.sToken.vBuffer);
         sToken.nBufCap  = kife::exchange(src.sToken.nBufCap, 0);
         sToken.nBufSize = kife::exchange(src.sToken.nBufSize, 0);
-        sToken.sPath    = release_ptr(src.sToken.sPath);
         sToken.nLine    = 1;
         sToken.nColumn  = 1;
         sToken.bUnget   = false;
@@ -88,7 +84,6 @@ namespace kife
         sToken.vBuffer  = release_ptr(src.sToken.vBuffer);
         sToken.nBufCap  = kife::exchange(src.sToken.nBufCap, 0);
         sToken.nBufSize = kife::exchange(src.sToken.nBufSize, 0);
-        sToken.sPath    = release_ptr(src.sToken.sPath);
         sToken.nLine    = 1;
         sToken.nColumn  = 1;
         sToken.bUnget   = false;
@@ -151,7 +146,7 @@ namespace kife
         return res;
     }
 
-    status_t Tokenizer::wrap(FILE *fd, bool close, const char *path)
+    status_t Tokenizer::wrap(FILE *fd, bool close)
     {
         if (!fd)
             return STATUS_BAD_ARGUMENTS;
@@ -167,12 +162,6 @@ namespace kife
         if (!tokbuf)
             return STATUS_NO_MEM;
         finally { free(tokbuf);     };
-
-        // Remember file name
-        char *name          = strdup((path) ? path : memory_file_name);
-        if (!name)
-            return STATUS_NO_MEM;
-        finally { free(name);       };
 
         // Commit state
         vBuffer         = release_ptr(iobuf);
@@ -190,13 +179,12 @@ namespace kife
         sToken.nBufSize = 0;
         sToken.nLine    = 1;
         sToken.nColumn  = 1;
-        sToken.sPath    = release_ptr(name);
         sToken.bUnget   = false;
 
         return STATUS_OK;
     }
 
-    status_t Tokenizer::wrap(const void *buf, size_t count, bool free, const char *path)
+    status_t Tokenizer::wrap(const void *buf, size_t count, bool free)
     {
         if (!buf)
             return STATUS_BAD_ARGUMENTS;
@@ -206,12 +194,6 @@ namespace kife
         if (!tokbuf)
             return STATUS_NO_MEM;
         finally { ::free(tokbuf);   };
-
-        // Remember file name
-        char *name          = strdup((path) ? path : memory_file_name);
-        if (!name)
-            return STATUS_NO_MEM;
-        finally { ::free(name);     };
 
         // Commit state
         vBuffer         = const_cast<char *>(static_cast<const char *>(buf));
@@ -229,7 +211,6 @@ namespace kife
         sToken.nBufSize = 0;
         sToken.nLine    = 1;
         sToken.nColumn  = 1;
-        sToken.sPath    = release_ptr(name);
         sToken.bUnget   = false;
 
         return STATUS_OK;
@@ -252,17 +233,15 @@ namespace kife
         }
 
         free(sToken.vBuffer);
-        free(sToken.sPath);
 
         bClose          = false;
         vBuffer         = nullptr;
         sToken.vBuffer  = nullptr;
-        sToken.sPath    = nullptr;
 
         return STATUS_OK;
     }
 
-    status_t Tokenizer::get(token_t & tok, const TokenSet & allowed)
+    status_t Tokenizer::get(kife::token_t & tok, const TokenSet & allowed)
     {
         if (!vBuffer)
             return STATUS_BAD_STATE;
@@ -270,11 +249,15 @@ namespace kife
         // There is pending token?
         if (sToken.bUnget)
         {
-            tok     = sToken;
+            tok.type        = sToken.enType;
+            tok.data        = sToken.vBuffer;
+            tok.line        = sToken.nLine;
+            tok.column      = sToken.nColumn;
+
             return STATUS_OK;
         }
 
-        // Main logic
+        // TODO: Main logic
 
         return STATUS_OK;
     }

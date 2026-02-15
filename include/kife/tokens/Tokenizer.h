@@ -51,7 +51,6 @@ namespace kife
                 size_t          nLine;          // Line
                 size_t          nColumn;        // Column
 
-                char *          sPath;          // File name
                 bool            bUnget;         // Unget flag
             } token_t;
 
@@ -95,8 +94,8 @@ namespace kife
 
         public:
             status_t open(const char *path);
-            status_t wrap(FILE *fd, bool close, const char *path = nullptr);
-            status_t wrap(const void *buf, size_t count, bool free, const char *path = nullptr);
+            status_t wrap(FILE *fd, bool close);
+            status_t wrap(const void *buf, size_t count, bool free);
             status_t close();
 
         public:
@@ -106,7 +105,7 @@ namespace kife
              * @param allowed list of allowed tokens
              * @return status of operation
              */
-            status_t        get(token_t & tok, const TokenSet & allowed);
+            status_t        get(kife::token_t & tok, const TokenSet & allowed);
 
             /**
              * Unget current token
