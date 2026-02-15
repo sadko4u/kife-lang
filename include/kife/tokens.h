@@ -33,9 +33,69 @@ namespace kife
         TT_STRING,              // String literal
         TT_CHARACTER,           // Character
 
+        // Comments
+        TT_COMMENT,             // Comment: /* ... */ OR // ...
+
+        // Syntax
+        TT_LBRACKET,            // Open bracket: (
+        TT_RBRACKET,            // Close bracket: )
+        TT_LBRACE,              // Open brace: {
+        TT_RBRACE,              // Close brace: }
+        TT_LQBRACKET,           // Open quad bracket: [
+        TT_RQBRACKET,           // Close quad bracket: ]
+        TT_COLON,               // Colon: :
+        TT_SEMICOLON,           // Semicolon: ;
+        TT_COMMA,               // Comma: ,
+        TT_DOT,                 // Dot: .
+
+        // Mathematics
+        TT_PLUS,                // Plus: +
+        TT_MINUS,               // Minus: -
+        TT_INCREMENT,           // Increment: ++
+        TT_DECREMENT,           // Decrement: --
+        TT_MUL,                 // Mul: *
+        TT_DIV,                 // Div: /
+        TT_MOD,                 // Mod: %
+
+        // Comparison
+        TT_LESS,                // Less: <
+        TT_LESS_EQ,             // Less or equal: <=
+        TT_GREATER,             // Greater: >
+        TT_GREATER_EQ,          // Greater or equal: >=
+        TT_EQUAL,               // Equal: ==
+        TT_NOT_EQUAL,           // Not equal: !=
+        TT_THREE_WAY,           // Three way comparison: <=>
+
+        // Logical operations
+        TT_NOT,                 // Not: !
+        TT_LOG_AND,             // And: &&
+        TT_LOG_OR,              // Or: ||
+        TT_LOG_XOR,             // Xor: ^^
+
+        // Bit operations
+        TT_NEG,                 // Binary not: ~
+        TT_AND,                 // Binary and: &
+        TT_OR,                  // Binary or: |
+        TT_XOR,                 // Binary xor: ^
+        TT_SHL,                 // Left shift: <<
+        TT_SSHR,                // Signed right shift: >>
+        TT_USHR,                // Unsigned right shift: >>>
+        TT_ROL,                 // Left shift rotation: <=<
+        TT_ROR,                 // Right shift rotation: >=>
+
         TT_UNKNOWN,             // Unknown token
         TT_END = TT_UNKNOWN,    // Special marker
     };
+
+    typedef struct token_t
+    {
+        token_type_t type;      // Decoded token type
+        const char *data;       // Token raw contents
+
+        const char *file;       // File name
+        size_t line;            // Line
+        size_t column;          // Column
+    } token_t;
 
 } /* namespace kife */
 

@@ -24,6 +24,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <errno.h>
 
 #ifdef KIFE_DEBUG
     #define IF_KIFE_DEBUG(...)  __VA_ARGS__
@@ -69,5 +70,8 @@ namespace kife
 } /* namespace kife */
 
 #include <kife/defs/variadic.hpp>
+#include <kife/defs/utility.hpp>
+#include <kife/defs/status.hpp>
+#include <kife/defs/finally.hpp>
 
 #endif /* KIFE_TYPES_H_ */
