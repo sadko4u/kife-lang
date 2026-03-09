@@ -38,6 +38,10 @@ namespace kife
         STATUS_BAD_STATE,
         STATUS_BAD_ARGUMENTS,
         STATUS_OVERFLOW,
+        STATUS_BAD_CHAR_LITERAL,
+        STATUS_BAD_STRING_LITERAL,
+        STATUS_UNEXPECTED_CHAR,
+        STATUS_UNEXPECTED_EOL,
     };
 
 } /* namespace kife */

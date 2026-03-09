@@ -87,15 +87,35 @@ namespace kife
              * @param c character to put
              * @return status of operation
              */
-            status_t        putch(const char_t & c);
+            status_t        putch(const codepoint_t c);
+
+            /**
+             * Put char to token buffer
+             * @param c character to put
+             * @return status of operation
+             */
+            inline status_t putch(const char_t & c);
+
+            /**
+             * Put buffer of characters
+             * @param c buffer of characters
+             * @param count number of characters
+             * @return status of operation
+             */
+            status_t        putch(const char_t * c, size_t n);
 
             /**
              * Update current position depending on the contents of character
              */
             inline void     update_position(const char_t & ch);
 
+            template <typename ... Args>
+            inline bool     lookup(char_t & ch, const TokenSet & allowed, Args && ... args);
+
         private:
-            static inline bool is_blank(const char_t & ch);
+            static inline bool      is_blank(const char_t & ch);
+            static inline int32_t   parse_hex(const char_t & ch);
+            static inline int32_t   parse_dec(const char_t & ch);
 
         private:
             /**
@@ -109,6 +129,40 @@ namespace kife
              * @return status of operation
              */
             status_t        read_multi_line_comment();
+
+            /**
+             * Read single character
+             * @return status of operation
+             */
+            status_t        read_character();
+
+            /**
+             * Read string sequence
+             * @return status of operation
+             */
+            status_t        read_string();
+
+            /**
+             * Read hexadecimal codepoint
+             * @param c codepoint to store value
+             * @param digits number of digits to read
+             * @return status of operation
+             */
+            status_t        read_hex_codepoint(codepoint_t & c, size_t digits);
+
+            /**
+             * Read variable-length hexadecimal codepoint
+             * @param c codepoint to store value
+             * @return status of operation
+             */
+            status_t        read_hex_codepoint(codepoint_t & c);
+
+            /**
+             * Read variable-length decimal codepoint
+             * @param c codepoint to store value
+             * @return status of operation
+             */
+            status_t        read_dec_codepoint(codepoint_t & c);
 
         public:
             Tokenizer();

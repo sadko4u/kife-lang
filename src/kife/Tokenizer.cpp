@@ -300,7 +300,7 @@ namespace kife
         return STATUS_OK;
     }
 
-    status_t Tokenizer::putch(const char_t & c)
+    status_t Tokenizer::putch(codepoint_t c)
     {
         // Reallocate buffer if needed
         if (sToken.nBufSize >= sToken.nBufCap)
@@ -314,13 +314,23 @@ namespace kife
             sToken.nBufCap          = new_cap;
         }
 
-        if (sToken.nBufSize <= 0)
-        {
-            sToken.nLine        = c.nLine;
-            sToken.nColumn      = c.nColumn;
-        }
+        sToken.vBuffer[sToken.nBufSize++]   = c;
+        return STATUS_OK;
+    }
 
-        sToken.vBuffer[sToken.nBufSize++]   = c.nCode;
+    inline status_t Tokenizer::putch(const char_t & c)
+    {
+        return putch(c.nCode);
+    }
+
+    status_t Tokenizer::putch(const char_t * c, size_t n)
+    {
+        for (size_t i=0; i<n; ++i)
+        {
+            status_t res = putch(c[i]);
+            if (res != STATUS_OK)
+                return res;
+        }
         return STATUS_OK;
     }
 
@@ -338,6 +348,26 @@ namespace kife
                 break;
         }
         return false;
+    }
+
+    inline int32_t Tokenizer::parse_hex(const char_t & ch)
+    {
+        const codepoint_t cp = ch.nCode;
+        if ((cp >= '0') && (cp <= '9'))
+            return cp - '0';
+        if ((cp >= 'a') && (cp <= 'f'))
+            return cp - 'a' + 10;
+        if ((cp >= 'A') && (cp <= 'F'))
+            return cp - 'A' + 10;
+        return -1;
+    }
+
+    inline int32_t Tokenizer::parse_dec(const char_t & ch)
+    {
+        const codepoint_t cp = ch.nCode;
+        if ((cp >= '0') && (cp <= '9'))
+            return cp - '0';
+        return -1;
     }
 
     status_t Tokenizer::read_single_line_comment()
@@ -382,6 +412,213 @@ namespace kife
         return res;
     }
 
+    status_t Tokenizer::read_hex_codepoint(codepoint_t & c, size_t digits)
+    {
+        char_t ch;
+        status_t res;
+        codepoint_t cp = 0;
+
+        for (size_t i=0; i<digits; ++i)
+        {
+            if ((res = getch(ch)) != STATUS_OK)
+                return res;
+
+            const int32_t code = parse_hex(ch);
+            if (code < 0)
+                return STATUS_UNEXPECTED_CHAR;
+
+            cp = (cp << 4) | code;
+        }
+
+        return STATUS_OK;
+    }
+
+    status_t Tokenizer::read_hex_codepoint(codepoint_t & c)
+    {
+        char_t ch;
+        status_t res;
+        codepoint_t cp = 0;
+
+        for (size_t i=0; i < 8; ++i)
+        {
+            if ((res = getch(ch)) != STATUS_OK)
+                return res;
+
+            const int32_t code = parse_hex(ch);
+            if (code < 0)
+                return ((i > 0) && (ch.nCode == ';')) ? STATUS_OK : STATUS_UNEXPECTED_CHAR;
+
+            cp = (cp << 4) | code;
+        }
+
+        // Require terminating semicolon
+        if ((res = getch(ch)) != STATUS_OK)
+            return res;
+
+        return (ch.nCode == ';') ? STATUS_OK : STATUS_UNEXPECTED_CHAR;
+    }
+
+    status_t Tokenizer::read_dec_codepoint(codepoint_t & c)
+    {
+        char_t ch;
+        status_t res;
+        codepoint_t cp = 0;
+
+        for (size_t i=0; cp <= UINT32_MAX / 10; ++i)
+        {
+            if ((res = getch(ch)) != STATUS_OK)
+                return res;
+
+            const int32_t code = parse_hex(ch);
+            if (code < 0)
+                return ((i > 0) && (ch.nCode == ';')) ? STATUS_OK : STATUS_UNEXPECTED_CHAR;
+
+            cp = (cp * 10) + code;
+        }
+
+        // Require terminating semicolon
+        if ((res = getch(ch)) != STATUS_OK)
+            return res;
+
+        return (ch.nCode == ';') ? STATUS_OK : STATUS_UNEXPECTED_CHAR;
+    }
+
+    status_t Tokenizer::read_character()
+    {
+        char_t ch;
+        status_t res;
+
+        if ((res = getch(ch)) != STATUS_OK)
+            return res;
+
+        if (ch.nCode == '\\')
+        {
+            // Escape sequence: one of \n \t \v \r \a \f \\ \' \" \xXX \uXXXX \UXXXXXXXX; \#DDDD; \XXXXX;
+            if ((res = getch(ch)) != STATUS_OK)
+                return res;
+
+            switch (ch.nCode)
+            {
+                case 'n':   ch.nCode  = '\n'; break;
+                case 't':   ch.nCode  = '\t'; break;
+                case 'v':   ch.nCode  = '\v'; break;
+                case 'r':   ch.nCode  = '\r'; break;
+                case 'f':   ch.nCode  = '\f'; break;
+                case 'a':   ch.nCode  = '\a'; break;
+                case '\\':  ch.nCode  = '\\'; break;
+                case '\'':  ch.nCode  = '\''; break;
+                case '\"':  ch.nCode  = '\n'; break;
+                case 'x':
+                    if ((res = read_hex_codepoint(ch.nCode, 2)) != STATUS_OK)
+                        return res;
+                    break;
+                case 'u':
+                    if ((res = read_hex_codepoint(ch.nCode, 4)) != STATUS_OK)
+                        return res;
+                    break;
+                case 'U':
+                    if ((res = read_hex_codepoint(ch.nCode, 8)) != STATUS_OK)
+                        return res;
+                    break;
+                case 'X':
+                    if ((res = read_hex_codepoint(ch.nCode)) != STATUS_OK)
+                        return res;
+                    break;
+                case '#':
+                    if ((res = read_dec_codepoint(ch.nCode)) != STATUS_OK)
+                        return res;
+                    break;
+                default:
+                    return STATUS_UNEXPECTED_CHAR;
+            }
+
+            if ((res = putch(ch)) != STATUS_OK)
+                return res;
+        }
+        else if ((res == putch(ch)) != STATUS_OK)
+            return res;
+
+        // Require closing '
+        if ((res = getch(ch)) != STATUS_OK)
+            return res;
+        return (ch.nCode == '\'') ? STATUS_OK : STATUS_BAD_CHAR_LITERAL;
+    }
+
+    status_t Tokenizer::read_string()
+    {
+        char_t ch;
+        status_t res;
+
+        while ((res = getch(ch)) == STATUS_OK)
+        {
+            const codepoint_t cp = ch.nCode;
+
+            // End of string?
+            if (cp == '\"')
+                return STATUS_OK;
+
+            if (cp == '\\')
+            {
+                // Escape sequence: one of \n \t \v \r \a \f \\ \' \" \xXX \uXXXX \UXXXXXXXX; \#DDDD; \XXXXX;
+                if ((res = getch(ch)) != STATUS_OK)
+                    return res;
+
+                switch (ch.nCode)
+                {
+                    case 'n':   ch.nCode  = '\n'; break;
+                    case 't':   ch.nCode  = '\t'; break;
+                    case 'v':   ch.nCode  = '\v'; break;
+                    case 'r':   ch.nCode  = '\r'; break;
+                    case 'f':   ch.nCode  = '\f'; break;
+                    case 'a':   ch.nCode  = '\a'; break;
+                    case '\\':  ch.nCode  = '\\'; break;
+                    case '\'':  ch.nCode  = '\''; break;
+                    case '\"':  ch.nCode  = '\n'; break;
+                    case 'x':
+                        if ((res = read_hex_codepoint(ch.nCode, 2)) != STATUS_OK)
+                            return res;
+                        break;
+                    case 'u':
+                        if ((res = read_hex_codepoint(ch.nCode, 4)) != STATUS_OK)
+                            return res;
+                        break;
+                    case 'U':
+                        if ((res = read_hex_codepoint(ch.nCode, 8)) != STATUS_OK)
+                            return res;
+                        break;
+                    case 'X':
+                        if ((res = read_hex_codepoint(ch.nCode)) != STATUS_OK)
+                            return res;
+                        break;
+                    case '#':
+                        if ((res = read_dec_codepoint(ch.nCode)) != STATUS_OK)
+                            return res;
+                        break;
+                    default:
+                        // Invalid escape sequence
+                        if ((res = putch('\\')) != STATUS_OK)
+                            return res;
+                        break;
+                }
+            }
+            else if (cp == '\n')
+                return STATUS_UNEXPECTED_EOL;
+
+            if ((res == putch(ch)) != STATUS_OK)
+                return res;
+        }
+
+        return res;
+    }
+
+    template <typename ... Args>
+    inline bool Tokenizer::lookup(char_t & ch, const TokenSet & allowed, Args && ... args)
+    {
+        if (!allowed.contains(kife::forward<Args>(args)...))
+            return false;
+        return getch(ch) == STATUS_OK;
+    }
+
     status_t Tokenizer::get(kife::token_t & tok, const TokenSet & allowed)
     {
         if (!vBuffer)
@@ -411,154 +648,157 @@ namespace kife
         }
         while (is_blank(ch[0]));
 
-        if ((res = putch(ch[0])) != STATUS_OK)
-            return res;
+        sToken.nLine        = ch[0].nLine;
+        sToken.nColumn      = ch[0].nColumn;
 
         switch (ch[0].nCode)
         {
             case '+': // tokens: + ++ +=
-                if (allowed.contains(TT_INCREMENT, TT_PLUS_ASSIGN))
+                if (lookup(ch[1], allowed, TT_INCREMENT, TT_PLUS_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '+') && (allowed.contains(TT_INCREMENT)))
                     {
-                        if ((ch[1].nCode == '+') && (allowed.contains(TT_INCREMENT)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_INCREMENT;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '=') && (allowed.contains(TT_PLUS_ASSIGN)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_PLUS_ASSIGN;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_INCREMENT;
+                        break;
                     }
+                    else if ((ch[1].nCode == '=') && (allowed.contains(TT_PLUS_ASSIGN)))
+                    {
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_PLUS_ASSIGN;
+                        break;
+                    }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_PLUS))
                 {
                     sToken.enType       = TT_PLUS;
-                    break;
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                 }
+
                 break;
 
             case '-': // tokens: - -- -> -=
-                if (allowed.contains(TT_DECREMENT, TT_POINTER, TT_MINUS_ASSIGN))
+                if (lookup(ch[1], allowed, TT_DECREMENT, TT_POINTER, TT_MINUS_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '-') && (allowed.contains(TT_DECREMENT)))
                     {
-                        if ((ch[1].nCode == '-') && (allowed.contains(TT_DECREMENT)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_DECREMENT;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '>') && (allowed.contains(TT_POINTER)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_POINTER;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '=') && (allowed.contains(TT_MINUS_ASSIGN)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_MINUS_ASSIGN;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_DECREMENT;
+                        break;
                     }
+                    else if ((ch[1].nCode == '>') && (allowed.contains(TT_POINTER)))
+                    {
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_POINTER;
+                        break;
+                    }
+                    else if ((ch[1].nCode == '=') && (allowed.contains(TT_MINUS_ASSIGN)))
+                    {
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_MINUS_ASSIGN;
+                        break;
+                    }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_MINUS))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_MINUS;
+                }
                 break;
 
             case '/': // tokens: / /= // /*
-                if (allowed.contains(TT_DIV_ASSIGN, TT_LINE_COMMENT, TT_MULTILINE_COMMENT))
+                if (lookup(ch[1], allowed, TT_DIV_ASSIGN, TT_LINE_COMMENT, TT_MULTILINE_COMMENT))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '=') && (allowed.contains(TT_DIV_ASSIGN)))
                     {
-                        if ((ch[1].nCode == '=') && (allowed.contains(TT_DIV_ASSIGN)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_DIV_ASSIGN;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '/') && (allowed.contains(TT_LINE_COMMENT)))
-                        {
-                            if ((res = read_single_line_comment()) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_LINE_COMMENT;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '*') && (allowed.contains(TT_MULTILINE_COMMENT)))
-                        {
-                            if ((res = read_multi_line_comment()) != STATUS_OK)
-                            {
-                                if (res == STATUS_EOF)
-                                {
-                                    sToken.enType   = TT_EOF; // Unexpected end of file
-                                    break;
-                                }
-                                return res;
-                            }
-                            sToken.enType       = TT_MULTILINE_COMMENT;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_DIV_ASSIGN;
+                        break;
                     }
+                    else if ((ch[1].nCode == '/') && (allowed.contains(TT_LINE_COMMENT)))
+                    {
+                        if ((res = read_single_line_comment()) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_LINE_COMMENT;
+                        break;
+                    }
+                    else if ((ch[1].nCode == '*') && (allowed.contains(TT_MULTILINE_COMMENT)))
+                    {
+                        if ((res = read_multi_line_comment()) != STATUS_OK)
+                        {
+                            if (res == STATUS_EOF)
+                            {
+                                sToken.enType   = TT_EOF; // Unexpected end of file
+                                break;
+                            }
+                            return res;
+                        }
+                        sToken.enType       = TT_MULTILINE_COMMENT;
+                        break;
+                    }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_DIV))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_DIV;
+                }
                 break;
 
             case '*': // tokens: * *=
-                if (allowed.contains(TT_MUL_ASSIGN))
+                if (lookup(ch[1], allowed, TT_MUL_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if (ch[1].nCode == '=')
                     {
-                        if (ch[1].nCode == '=')
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_MUL_ASSIGN;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_MUL_ASSIGN;
+                        break;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_MUL))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_MUL;
+                }
                 break;
 
             case '%': // tokens: % %=
-                if (allowed.contains(TT_MOD_ASSIGN))
+                if (lookup(ch[1], allowed, TT_MOD_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if (ch[1].nCode == '=')
                     {
-                        if (ch[1].nCode == '=')
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_MOD_ASSIGN;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_MOD_ASSIGN;
+                        break;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_MOD))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_MOD;
+                }
                 break;
 
             case '(': // tokens: (
@@ -568,280 +808,525 @@ namespace kife
 
             case ')': // tokens: )
                 if (allowed.contains(TT_RBRACKET))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_RBRACKET;
+                }
                 break;
 
             case '{': // tokens: {
                 if (allowed.contains(TT_LBRACE))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_LBRACE;
+                }
                 break;
 
             case '}': // tokens: }
                 if (allowed.contains(TT_RBRACE))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_RBRACE;
+                }
                 break;
 
             case '[': // tokens: [
                 if (allowed.contains(TT_LQBRACKET))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_LQBRACKET;
+                }
                 break;
 
             case ']': // tokens: ]
                 if (allowed.contains(TT_RQBRACKET))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_RQBRACKET;
+                }
                 break;
 
             case ':': // tokens: :
                 if (allowed.contains(TT_COLON))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_COLON;
+                }
                 break;
 
             case ';': // tokens: ;
                 if (allowed.contains(TT_SEMICOLON))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_SEMICOLON;
+                }
                 break;
 
             case ',': // tokens: ,
                 if (allowed.contains(TT_COMMA))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_COMMA;
+                }
                 break;
 
             case '.': // tokens: .
                 if (allowed.contains(TT_DOT))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_DOT;
+                }
+                break;
+
+            case '~': // tokens: ~
+                if (allowed.contains(TT_NEG))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
+                    sToken.enType       = TT_NEG;
+                }
                 break;
 
             case '?': // tokens: ? ?? ?. ?:
-                if (allowed.contains(TT_DOUBLE_QUESTION, TT_OPTIONAL_COLON, TT_OPTIONAL_DOT))
+                if (lookup(ch[1], allowed, TT_DOUBLE_QUESTION, TT_OPTIONAL_COLON, TT_OPTIONAL_DOT))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '?') && (allowed.contains(TT_DOUBLE_QUESTION)))
                     {
-                        if ((ch[1].nCode == '?') && (allowed.contains(TT_DOUBLE_QUESTION)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_DOUBLE_QUESTION;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '.') && (allowed.contains(TT_OPTIONAL_DOT)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_OPTIONAL_DOT;
-                            break;
-                        }
-                        else if ((ch[1].nCode == ':') && (allowed.contains(TT_OPTIONAL_COLON)))
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_OPTIONAL_COLON;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_DOUBLE_QUESTION;
+                        break;
                     }
+                    else if ((ch[1].nCode == '.') && (allowed.contains(TT_OPTIONAL_DOT)))
+                    {
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_OPTIONAL_DOT;
+                        break;
+                    }
+                    else if ((ch[1].nCode == ':') && (allowed.contains(TT_OPTIONAL_COLON)))
+                    {
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_OPTIONAL_COLON;
+                        break;
+                    }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_QUESTION))
                 {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_QUESTION;
-                    break;
                 }
                 break;
 
             case '=': // tokens: = ==
-                if (allowed.contains(TT_EQUAL))
+                if (lookup(ch[1], allowed, TT_EQUAL))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if (ch[1].nCode == '=')
                     {
-                        if (ch[1].nCode == '=')
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_EQUAL;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_EQUAL;
+                        break;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_ASSIGN))
                 {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_ASSIGN;
-                    break;
                 }
                 break;
 
             case '!': // tokens: ! !=
-                if (allowed.contains(TT_NOT_EQUAL))
+                if (lookup(ch[1], allowed, TT_NOT_EQUAL))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if (ch[1].nCode == '=')
                     {
-                        if (ch[1].nCode == '=')
-                        {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_NOT_EQUAL;
-                            break;
-                        }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
+                        if ((res = putch(ch, 2)) != STATUS_OK)
                             return res;
+                        sToken.enType       = TT_NOT_EQUAL;
+                        break;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_NOT))
                 {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_NOT;
-                    break;
                 }
                 break;
 
             case '&': // tokens: & &= && &&=
-                if (allowed.contains(TT_AND_ASSIGN, TT_LOG_AND, TT_LOG_AND_ASSIGN))
+                if (lookup(ch[1], allowed, TT_AND_ASSIGN, TT_LOG_AND, TT_LOG_AND_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '=') && (allowed.contains(TT_AND_ASSIGN)))
                     {
-                        if ((ch[1].nCode == '=') && (allowed.contains(TT_AND_ASSIGN)))
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_AND_ASSIGN;
+                        break;
+                    }
+                    else if (ch[1].nCode == '&')
+                    {
+                        if (lookup(ch[2], allowed, TT_LOG_AND_ASSIGN))
                         {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_AND_ASSIGN;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '&') && (allowed.contains(TT_LOG_AND, TT_LOG_AND_ASSIGN)))
-                        {
-                            if ((res = getch(ch[2])) == STATUS_OK)
+                            if (ch[2].nCode == '=')
                             {
-                                if ((ch[2].nCode == '=') && (allowed.contains(TT_LOG_AND_ASSIGN)))
-                                {
-                                    if ((res = putch(ch[2])) != STATUS_OK)
-                                        return res;
-                                    sToken.enType       = TT_LOG_AND_ASSIGN;
-                                    break;
-                                }
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_LOG_AND_ASSIGN;
+                                break;
                             }
 
                             if ((res = ungetch(ch[2])) != STATUS_OK)
                                 return res;
+                        }
 
+                        if (allowed.contains(TT_LOG_AND))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
                             sToken.enType       = TT_LOG_AND;
                             break;
                         }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
-                            return res;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_AND))
                 {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_AND;
-                    break;
                 }
                 break;
 
             case '|': // tokens: | |= || ||=
-                if (allowed.contains(TT_OR_ASSIGN, TT_LOG_OR, TT_LOG_OR_ASSIGN))
+                if (lookup(ch[1], allowed, TT_OR_ASSIGN, TT_LOG_OR, TT_LOG_OR_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '=') && (allowed.contains(TT_OR_ASSIGN)))
                     {
-                        if ((ch[1].nCode == '=') && (allowed.contains(TT_OR_ASSIGN)))
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_OR_ASSIGN;
+                        break;
+                    }
+                    else if (ch[1].nCode == '|')
+                    {
+                        if (lookup(ch[2], allowed, TT_LOG_OR_ASSIGN))
                         {
-                            if ((res = putch(ch[1])) != STATUS_OK)
-                                return res;
-                            sToken.enType       = TT_OR_ASSIGN;
-                            break;
-                        }
-                        else if ((ch[1].nCode == '|') && (allowed.contains(TT_LOG_OR, TT_LOG_OR_ASSIGN)))
-                        {
-                            if ((res = getch(ch[2])) == STATUS_OK)
+                            if (ch[2].nCode == '=')
                             {
-                                if ((ch[2].nCode == '=') && (allowed.contains(TT_LOG_OR_ASSIGN)))
-                                {
-                                    if ((res = putch(ch[2])) != STATUS_OK)
-                                        return res;
-                                    sToken.enType       = TT_LOG_OR_ASSIGN;
-                                    break;
-                                }
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_LOG_OR_ASSIGN;
+                                break;
                             }
 
                             if ((res = ungetch(ch[2])) != STATUS_OK)
                                 return res;
+                        }
 
+                        if (allowed.contains(TT_LOG_OR))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
                             sToken.enType       = TT_LOG_OR;
                             break;
                         }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
-                            return res;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
                 if (allowed.contains(TT_OR))
                 {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
                     sToken.enType       = TT_OR;
-                    break;
                 }
                 break;
 
             case '^': // tokens: ^ ^= ^^ ^^=
-                if (allowed.contains(TT_XOR_ASSIGN, TT_LOG_XOR, TT_LOG_XOR_ASSIGN))
+                if (lookup(ch[1], allowed, TT_XOR_ASSIGN, TT_LOG_XOR, TT_LOG_XOR_ASSIGN))
                 {
-                    if ((res = getch(ch[1])) == STATUS_OK)
+                    if ((ch[1].nCode == '=') && (allowed.contains(TT_XOR_ASSIGN)))
                     {
-                        if ((ch[1].nCode == '=') && (allowed.contains(TT_XOR_ASSIGN)))
+                        if ((res = putch(ch, 2)) != STATUS_OK)
+                            return res;
+                        sToken.enType       = TT_XOR_ASSIGN;
+                        break;
+                    }
+                    else if (ch[1].nCode == '^')
+                    {
+                        if (lookup(ch[2], allowed, TT_LOG_XOR_ASSIGN))
                         {
-                            if ((res = putch(ch[1])) != STATUS_OK)
+                            if (ch[2].nCode == '=')
+                            {
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_LOG_XOR_ASSIGN;
+                                break;
+                            }
+
+                            if ((res = ungetch(ch[2])) != STATUS_OK)
                                 return res;
-                            sToken.enType       = TT_XOR_ASSIGN;
+                        }
+
+                        if (allowed.contains(TT_LOG_XOR))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
+                            sToken.enType       = TT_LOG_XOR;
                             break;
                         }
-                        else if ((ch[1].nCode == '^') && (allowed.contains(TT_LOG_XOR, TT_LOG_XOR_ASSIGN)))
+                    }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
+                }
+                if (allowed.contains(TT_XOR))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
+                    sToken.enType       = TT_XOR;
+                }
+                break;
+
+            case '<': // tokens: < <= << <<= <=< <=> <=<=
+                if (lookup(ch[1], allowed, TT_LESS_EQ, TT_SHL, TT_SHL_ASSIGN, TT_ROL, TT_THREE_WAY, TT_ROL_ASSIGN))
+                {
+                    if (ch[1].nCode == '=') // tokens: <= <=< <=> <=<=
+                    {
+                        if (lookup(ch[2], allowed, TT_ROL, TT_THREE_WAY, TT_ROL_ASSIGN))
                         {
-                            if ((res = getch(ch[2])) == STATUS_OK)
+                            if (ch[2].nCode == '<')
                             {
-                                if ((ch[2].nCode == '=') && (allowed.contains(TT_LOG_XOR_ASSIGN)))
+                                if (lookup(ch[3], allowed, TT_ROL_ASSIGN)) // tokens: <=< <=<=
                                 {
-                                    if ((res = putch(ch[2])) != STATUS_OK)
+                                    if (ch[3].nCode == '=')
+                                    {
+                                        if ((res = putch(ch, 4)) != STATUS_OK)
+                                            return res;
+
+                                        sToken.enType       = TT_ROL_ASSIGN;
+                                        break;
+                                    }
+
+                                    if ((res = ungetch(ch[3])) != STATUS_OK)
                                         return res;
-                                    sToken.enType       = TT_LOG_XOR_ASSIGN;
+                                }
+
+                                if (allowed.contains(TT_ROL))
+                                {
+                                    if ((res = putch(ch, 3)) != STATUS_OK)
+                                        return res;
+                                    sToken.enType       = TT_ROL;
+                                }
+                                break;
+                            }
+                            else if ((ch[2].nCode == '>') && (allowed.contains(TT_THREE_WAY)))
+                            {
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_THREE_WAY;
+                                break;
+                            }
+
+                            if ((res = ungetch(ch[2])) != STATUS_OK)
+                                return res;
+                        }
+
+                        if (allowed.contains(TT_LESS_EQ))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
+                            sToken.enType       = TT_LESS_EQ;
+                        }
+                        break;
+                    }
+                    else if (ch[1].nCode == '<') // tokens: << <<=
+                    {
+                        if (lookup(ch[2], allowed, TT_SHL_ASSIGN))
+                        {
+                            if (ch[2].nCode == '=')
+                            {
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_SHL_ASSIGN;
+                                break;
+                            }
+
+                            if ((res = ungetch(ch[2])) != STATUS_OK)
+                                return res;
+                        }
+
+                        if (allowed.contains(TT_SHL))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
+                            sToken.enType       = TT_SHL;
+                            break;
+                        }
+                    }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
+                }
+                if (allowed.contains(TT_LESS))
+                {
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
+                    sToken.enType       = TT_LESS;
+                }
+
+                break;
+
+            case '>': // tokens: > >> >>> >>>= >= >>= >=> >=>=
+                if (lookup(ch[1], allowed, TT_GREATER_EQ, TT_SHR, TT_SHR_ASSIGN, TT_ROR, TT_USHR, TT_USHR_ASSIGN, TT_ROR_ASSIGN))
+                {
+                    if (ch[1].nCode == '=') // tokens: >= >=> >=>=
+                    {
+                        if (lookup(ch[2], allowed, TT_ROR, TT_ROR_ASSIGN))
+                        {
+                            if (ch[2].nCode == '>') // tokens: >=> >=>=
+                            {
+                                if (lookup(ch[3], allowed, TT_ROR_ASSIGN))
+                                {
+                                    if (ch[3].nCode == '=')
+                                    {
+                                        if ((res = putch(ch, 4)) != STATUS_OK)
+                                            return res;
+
+                                        sToken.enType       = TT_ROR_ASSIGN;
+                                        break;
+                                    }
+
+                                    if ((res = ungetch(ch[3])) != STATUS_OK)
+                                        return res;
+                                }
+
+                                if (allowed.contains(TT_ROR))
+                                {
+                                    if ((res = putch(ch, 3)) != STATUS_OK)
+                                        return res;
+                                    sToken.enType       = TT_ROR;
                                     break;
                                 }
                             }
 
                             if ((res = ungetch(ch[2])) != STATUS_OK)
                                 return res;
+                        }
 
-                            sToken.enType       = TT_LOG_XOR;
+                        if (allowed.contains(TT_GREATER_EQ))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
+                            sToken.enType       = TT_GREATER_EQ;
+                        }
+                        break;
+                    }
+                    else if (ch[1].nCode == '>') // tokens: >> >>= >>> >>>=
+                    {
+                        if (lookup(ch[2], allowed, TT_SHR_ASSIGN, TT_USHR, TT_USHR_ASSIGN))
+                        {
+                            if (ch[2].nCode == '>') // tokens: >>> >>>=
+                            {
+                                if (lookup(ch[2], allowed, TT_USHR_ASSIGN))
+                                {
+                                    if (ch[3].nCode == '=')
+                                    {
+                                        if ((res = putch(ch, 4)) != STATUS_OK)
+                                            return res;
+
+                                        sToken.enType       = TT_USHR_ASSIGN;
+                                        break;
+                                    }
+
+                                    if ((res = ungetch(ch[3])) != STATUS_OK)
+                                        return res;
+                                }
+
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_USHR;
+                                break;
+                            }
+
+                            if ((ch[2].nCode == '=') && (allowed.contains(TT_SHR_ASSIGN)))
+                            {
+                                if ((res = putch(ch, 3)) != STATUS_OK)
+                                    return res;
+                                sToken.enType       = TT_SHR_ASSIGN;
+                                break;
+                            }
+
+                            if ((res = ungetch(ch[3])) != STATUS_OK)
+                                return res;
+                        }
+
+                        if (allowed.contains(TT_SHR))
+                        {
+                            if ((res = putch(ch, 2)) != STATUS_OK)
+                                return res;
+                            sToken.enType       = TT_SHR;
                             break;
                         }
-                        if ((res = ungetch(ch[1])) != STATUS_OK)
-                            return res;
                     }
+                    if ((res = ungetch(ch[1])) != STATUS_OK)
+                        return res;
                 }
-                if (allowed.contains(TT_XOR))
+                if (allowed.contains(TT_GREATER))
                 {
-                    sToken.enType       = TT_XOR;
-                    break;
+                    if ((res = putch(ch, 1)) != STATUS_OK)
+                        return res;
+                    sToken.enType       = TT_GREATER;
+                }
+
+                break;
+
+            case '\'':
+                if (allowed.contains(TT_CHARACTER))
+                {
+                    if ((res = read_character()) != STATUS_OK)
+                        return res;
+                    sToken.enType       = TT_CHARACTER;
+                }
+                break;
+
+            case '\"':
+                if (allowed.contains(TT_STRING))
+                {
+                    if ((res = read_string()) != STATUS_OK)
+                        return res;
+                    sToken.enType       = TT_STRING;
                 }
                 break;
 
             // Left:
-//            TT_LESS,                // Less: <
-//            TT_LESS_EQ,             // Less or equal: <=
-//            TT_SHL,                 // Left shift: <<
-//            TT_SHL_ASSIGN,          // Left shift-assign: <<=
-//            TT_ROL,                 // Cyclic left shift rotation: <=<
-//            TT_ROL_ASSIGN,          // Cyclic left shift rotation-assign: <=<=
-//            TT_THREE_WAY,           // Three way comparison: <=>
-//            TT_GREATER,             // Greater: >
-//            TT_GREATER_EQ,          // Greater or equal: >=
-//            TT_SHR,                 // Right shift: >>
-//            TT_SHR_ASSIGN,          // Right shift-assign: >>=
-//            TT_ROR,                 // Cyclic right shift rotation: >=>
-//            TT_ROR_ASSIGN,          // Cyclic right shift rotation-assign: >=>=
-//            TT_USHR,                // Unsigned right shift: >>>
-//            TT_USHR_ASSIGN,         // Unsigned right shift-assign: >>>=
 //            TT_IDENTIFIER,          // Identifier
 //            TT_NUMERIC,             // Numeric constant
 //            TT_STRING,              // String literal
 //            TT_CHARACTER,           // Character
 
             default:
+                if ((res = putch(ch[0])) != STATUS_OK)
+                    return res;
                 break;
         }
 
