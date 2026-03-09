@@ -48,7 +48,10 @@ namespace kife
             inline ~TokenSet() noexcept;
 
         public:
+            template <typename First, typename ... Second>
+            inline bool contains(First item, Second && ... next) const noexcept;
             inline bool contains(token_type_t token) const noexcept;
+            inline bool contains(const TokenSet & set) const noexcept;
             inline TokenSet & clear() noexcept;
 
             inline TokenSet & assign(const TokenSet & src) noexcept;
@@ -65,7 +68,7 @@ namespace kife
             inline TokenSet & reset(First item, Second && ... next) noexcept;
 
         public:
-            inline bool operator [](token_type_t token)  noexcept;
+            inline bool operator [](token_type_t token) const noexcept;
             inline TokenSet & operator = (const TokenSet & src) noexcept;
             inline TokenSet & operator = (TokenSet && src) noexcept;
     };

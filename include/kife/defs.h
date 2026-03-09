@@ -67,6 +67,7 @@ namespace kife
     constexpr size_t SMWORD_MIN         = smword_t(UMWORD_MAX >> 1);
     constexpr size_t SMWORD_MAX         = smword_t((UMWORD_MAX >> 1) - 1);
 
+    typedef uint32_t                    codepoint_t;
 } /* namespace kife */
 
 #include <kife/defs/variadic.hpp>

@@ -66,10 +66,26 @@ namespace kife
     }
 
     // Set operations
-    bool TokenSet::contains(token_type_t token) const noexcept
+    inline bool TokenSet::contains(token_type_t token) const noexcept
     {
         const size_t word = token / UMWORD_BITS;
         return (word < NUM_WORDS) ? vBitMask[word] & (umword_t(1) << (token % UMWORD_BITS)) : false;
+    }
+
+    inline bool TokenSet::contains(const TokenSet & src) const noexcept
+    {
+        for (size_t i=0; i<NUM_WORDS; ++i)
+            if (vBitMask[i] & src.vBitMask[i])
+                return true;
+        return false;
+    }
+
+    template <typename First, typename ... Second>
+    inline bool TokenSet::contains(First item, Second && ... next) const noexcept
+    {
+        if (contains(item))
+            return true;
+        return contains(kife::forward<Second>(next)...);
     }
 
     inline TokenSet & TokenSet::clear() noexcept
@@ -120,7 +136,7 @@ namespace kife
     }
 
     // Operators
-    inline bool TokenSet::operator [](token_type_t token) noexcept
+    inline bool TokenSet::operator [](token_type_t token) const noexcept
     {
         return contains(token);
     }

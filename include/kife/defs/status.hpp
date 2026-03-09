@@ -37,6 +37,7 @@ namespace kife
         STATUS_IO_ERROR,
         STATUS_BAD_STATE,
         STATUS_BAD_ARGUMENTS,
+        STATUS_OVERFLOW,
     };
 
 } /* namespace kife */

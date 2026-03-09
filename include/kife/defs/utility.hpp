@@ -51,6 +51,44 @@ namespace kife
         return old;
     }
 
+    template <class A, class B>
+    constexpr inline A max(A a, B b)
+    {
+        return (a > b) ? a : b;
+    }
+
+    template <class A, class B, class C>
+    constexpr inline A max(A a, B b, C c)
+    {
+        return ((a > b) && (a > c)) ? a :
+                (b > c) ? b : c;
+    }
+
+    template <class A, class B, class C, class D>
+    constexpr inline A max(A a, B b, C c, D d)
+    {
+        return lsp_max(lsp_max(a, b), lsp_max(c, d));
+    }
+
+    template <class A, class B>
+    constexpr inline A min(A a, B b)
+    {
+        return (a < b) ? a : b;
+    }
+
+    template <class A, class B, class C>
+    constexpr inline A min(A a, B b, C c)
+    {
+        return ((a < b) && (a < c)) ? a :
+            (b < c) ? b : c;
+    }
+
+    template <class A, class B, class C, class D>
+    constexpr inline A min(A a, B b, C c, D d)
+    {
+        return lsp_min(lsp_min(a, b), lsp_min(c, d));
+    }
+
 } /* namespace kife */
 
 

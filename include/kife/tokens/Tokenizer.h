@@ -34,18 +34,20 @@ namespace kife
     {
         public:
             static constexpr size_t BUFFER_SIZE = 0x1000;
+            static constexpr size_t MAX_UNGETCH = 4;
 
         private:
             typedef struct char_t
             {
-                uint8_t         nCode;          // Current code
-                bool            bUnget;         // Unget flag
+                size_t          nLine;                  // Line
+                size_t          nColumn;                // Column
+                codepoint_t     nCode;                  // Char code point
             } char_t;
 
             typedef struct token_t
             {
                 token_type_t    enType;         // Decoded token type
-                char           *vBuffer;        // Token raw contents
+                codepoint_t    *vBuffer;        // Token raw contents
                 size_t          nBufCap;        // Token buffer capacity
                 size_t          nBufSize;       // Token buffer size
                 size_t          nLine;          // Line
@@ -55,33 +57,58 @@ namespace kife
             } token_t;
 
         private:
-            char           *vBuffer;            // I/O buffer
-            size_t          nBufSize;           // Buffer size
-            size_t          nOffset;            // Buffer offset
-            FILE           *pFD;                // Associated file descriptor
-            bool            bClose;             // Close identifier
+            char           *vBuffer;                // I/O buffer
+            size_t          nBufSize;               // Buffer size
+            size_t          nOffset;                // Buffer offset
+            size_t          nLine;                  // Line
+            size_t          nColumn;                // Column
+            size_t          nUngetch;               // Number of elements in the ungetch buffer
+            bool            bClose;                 // Close identifier
+            FILE           *pFD;                    // Associated file descriptor
 
-            char_t          sChar;              // Current char
-            token_t         sToken;             // Current token
+            char_t          vUngetch[MAX_UNGETCH];  // Current char
+            token_t         sToken;                 // Current token
 
         private:
             /**
-             * Get character from stream
-             * @return character code
+             * Get character from stream. If there is data in the ungetch buffer,
+             * then the character is extracted from the ungetch buffer.
+             * @return status of operation
              */
-            status_t        getch();
+            status_t        getch(char_t & ch);
 
             /**
-             * Unget last character from stream
+             * Unget character
              */
-            inline void     ungetch();
+            inline status_t ungetch(const char_t & ch);
 
             /**
              * Put char to token buffer
-             * @param c
-             * @return
+             * @param c character to put
+             * @return status of operation
              */
-            status_t        putch(char c);
+            status_t        putch(const char_t & c);
+
+            /**
+             * Update current position depending on the contents of character
+             */
+            inline void     update_position(const char_t & ch);
+
+        private:
+            static inline bool is_blank(const char_t & ch);
+
+        private:
+            /**
+             * Read single-line comment to the token
+             * @return status of operation
+             */
+            status_t        read_single_line_comment();
+
+            /**
+             * Read multi-line comment to the token
+             * @return status of operation
+             */
+            status_t        read_multi_line_comment();
 
         public:
             Tokenizer();
